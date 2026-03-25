@@ -495,6 +495,13 @@ export function IssueDetail() {
     },
   });
 
+  const deleteComment = useMutation({
+    mutationFn: (commentId: string) => issuesApi.deleteComment(issueId!, commentId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.issues.comments(issueId!) });
+    },
+  });
+
   const addComment = useMutation({
     mutationFn: ({ body, reopen }: { body: string; reopen?: boolean }) =>
       issuesApi.addComment(issueId!, body, reopen),
@@ -1068,6 +1075,7 @@ export function IssueDetail() {
             currentAssigneeValue={actualAssigneeValue}
             suggestedAssigneeValue={suggestedAssigneeValue}
             mentions={mentionOptions}
+            onDelete={async (commentId) => { await deleteComment.mutateAsync(commentId); }}
             onAdd={async (body, reopen, reassignment) => {
               if (reassignment) {
                 await addCommentAndReassign.mutateAsync({ body, reopen, reassignment });

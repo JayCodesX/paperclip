@@ -1401,6 +1401,14 @@ export function issueService(db: Db) {
       return redactIssueComment(comment, currentUserRedactionOptions.enabled);
     },
 
+    removeComment: async (commentId: string) => {
+      const [removed] = await db
+        .delete(issueComments)
+        .where(eq(issueComments.id, commentId))
+        .returning();
+      return removed ?? null;
+    },
+
     createAttachment: async (input: {
       issueId: string;
       issueCommentId?: string | null;

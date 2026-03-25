@@ -2,7 +2,8 @@ import { memo, useEffect, useMemo, useRef, useState, type ChangeEvent } from "re
 import { Link, useLocation } from "react-router-dom";
 import type { IssueComment, Agent } from "@paperclipai/shared";
 import { Button } from "@/components/ui/button";
-import { Check, Copy, Paperclip } from "lucide-react";
+import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
+import { Check, Copy, Loader2, Paperclip, Trash2 } from "lucide-react";
 import { Identity } from "./Identity";
 import { InlineEntitySelector, type InlineEntityOption } from "./InlineEntitySelector";
 import { MarkdownBody } from "./MarkdownBody";
@@ -36,6 +37,7 @@ interface CommentThreadProps {
   companyId?: string | null;
   projectId?: string | null;
   onAdd: (body: string, reopen?: boolean, reassignment?: CommentReassignment) => Promise<void>;
+  onDelete?: (commentId: string) => Promise<void>;
   issueStatus?: string;
   agentMap?: Map<string, Agent>;
   imageUploadHandler?: (file: File) => Promise<string>;
@@ -118,18 +120,162 @@ type TimelineItem =
   | { kind: "comment"; id: string; createdAtMs: number; comment: CommentWithRunMeta }
   | { kind: "run"; id: string; createdAtMs: number; run: LinkedRunItem };
 
+function CommentItem({
+  comment,
+  agentMap,
+  companyId,
+  projectId,
+  isHighlighted,
+  onDelete,
+}: {
+  comment: CommentWithRunMeta;
+  agentMap?: Map<string, Agent>;
+  companyId?: string | null;
+  projectId?: string | null;
+  isHighlighted: boolean;
+  onDelete?: (commentId: string) => Promise<void>;
+}) {
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  return (
+    <div
+      id={`comment-${comment.id}`}
+      className={`group border p-3 overflow-hidden min-w-0 rounded-sm transition-colors duration-1000 ${isHighlighted ? "border-primary/50 bg-primary/5" : "border-border"}`}
+    >
+      <div className="flex items-center justify-between mb-1">
+        {comment.authorAgentId ? (
+          <Link to={`/agents/${comment.authorAgentId}`} className="hover:underline">
+            <Identity
+              name={agentMap?.get(comment.authorAgentId)?.name ?? comment.authorAgentId.slice(0, 8)}
+              size="sm"
+            />
+          </Link>
+        ) : (
+          <Identity name="You" size="sm" />
+        )}
+        <span className="flex items-center gap-1.5">
+          {companyId ? (
+            <PluginSlotOutlet
+              slotTypes={["commentContextMenuItem"]}
+              entityType="comment"
+              context={{
+                companyId,
+                projectId: projectId ?? null,
+                entityId: comment.id,
+                entityType: "comment",
+                parentEntityId: comment.issueId,
+              }}
+              className="flex flex-wrap items-center gap-1.5"
+              itemClassName="inline-flex"
+              missingBehavior="placeholder"
+            />
+          ) : null}
+          {onDelete && (
+            deleting ? (
+              <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />
+            ) : (
+              <Popover open={confirmDelete} onOpenChange={setConfirmDelete}>
+                <PopoverTrigger asChild>
+                  <button
+                    type="button"
+                    className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive transition-opacity"
+                    title="Delete comment"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <Trash2 className="h-3 w-3" />
+                  </button>
+                </PopoverTrigger>
+                <PopoverContent className="w-44 p-2" side="left">
+                  <p className="text-xs text-muted-foreground mb-2">Delete this comment?</p>
+                  <div className="flex gap-1.5">
+                    <button
+                      className="flex-1 px-2 py-1 text-xs rounded border border-border hover:bg-accent"
+                      onClick={() => setConfirmDelete(false)}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      className="flex-1 px-2 py-1 text-xs rounded bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                      onClick={async () => {
+                        setConfirmDelete(false);
+                        setDeleting(true);
+                        try {
+                          await onDelete(comment.id);
+                        } finally {
+                          setDeleting(false);
+                        }
+                      }}
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </PopoverContent>
+              </Popover>
+            )
+          )}
+          <a
+            href={`#comment-${comment.id}`}
+            className="text-xs text-muted-foreground hover:text-foreground hover:underline transition-colors"
+          >
+            {formatDateTime(comment.createdAt)}
+          </a>
+          <CopyMarkdownButton text={comment.body} />
+        </span>
+      </div>
+      <MarkdownBody className="text-sm">{comment.body}</MarkdownBody>
+      {companyId ? (
+        <div className="mt-2 space-y-2">
+          <PluginSlotOutlet
+            slotTypes={["commentAnnotation"]}
+            entityType="comment"
+            context={{
+              companyId,
+              projectId: projectId ?? null,
+              entityId: comment.id,
+              entityType: "comment",
+              parentEntityId: comment.issueId,
+            }}
+            className="space-y-2"
+            itemClassName="rounded-md"
+            missingBehavior="placeholder"
+          />
+        </div>
+      ) : null}
+      {comment.runId && (
+        <div className="mt-2 pt-2 border-t border-border/60">
+          {comment.runAgentId ? (
+            <Link
+              to={`/agents/${comment.runAgentId}/runs/${comment.runId}`}
+              className="inline-flex items-center rounded-md border border-border bg-accent/30 px-2 py-1 text-[10px] font-mono text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors"
+            >
+              run {comment.runId.slice(0, 8)}
+            </Link>
+          ) : (
+            <span className="inline-flex items-center rounded-md border border-border bg-accent/30 px-2 py-1 text-[10px] font-mono text-muted-foreground">
+              run {comment.runId.slice(0, 8)}
+            </span>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 const TimelineList = memo(function TimelineList({
   timeline,
   agentMap,
   companyId,
   projectId,
   highlightCommentId,
+  onDelete,
 }: {
   timeline: TimelineItem[];
   agentMap?: Map<string, Agent>;
   companyId?: string | null;
   projectId?: string | null;
   highlightCommentId?: string | null;
+  onDelete?: (commentId: string) => Promise<void>;
 }) {
   if (timeline.length === 0) {
     return <p className="text-sm text-muted-foreground">No comments or runs yet.</p>;
@@ -168,86 +314,16 @@ const TimelineList = memo(function TimelineList({
         }
 
         const comment = item.comment;
-        const isHighlighted = highlightCommentId === comment.id;
         return (
-          <div
+          <CommentItem
             key={comment.id}
-            id={`comment-${comment.id}`}
-            className={`border p-3 overflow-hidden min-w-0 rounded-sm transition-colors duration-1000 ${isHighlighted ? "border-primary/50 bg-primary/5" : "border-border"}`}
-          >
-            <div className="flex items-center justify-between mb-1">
-              {comment.authorAgentId ? (
-                <Link to={`/agents/${comment.authorAgentId}`} className="hover:underline">
-                  <Identity
-                    name={agentMap?.get(comment.authorAgentId)?.name ?? comment.authorAgentId.slice(0, 8)}
-                    size="sm"
-                  />
-                </Link>
-              ) : (
-                <Identity name="You" size="sm" />
-              )}
-              <span className="flex items-center gap-1.5">
-                {companyId ? (
-                  <PluginSlotOutlet
-                    slotTypes={["commentContextMenuItem"]}
-                    entityType="comment"
-                    context={{
-                      companyId,
-                      projectId: projectId ?? null,
-                      entityId: comment.id,
-                      entityType: "comment",
-                      parentEntityId: comment.issueId,
-                    }}
-                    className="flex flex-wrap items-center gap-1.5"
-                    itemClassName="inline-flex"
-                    missingBehavior="placeholder"
-                  />
-                ) : null}
-                <a
-                  href={`#comment-${comment.id}`}
-                  className="text-xs text-muted-foreground hover:text-foreground hover:underline transition-colors"
-                >
-                  {formatDateTime(comment.createdAt)}
-                </a>
-                <CopyMarkdownButton text={comment.body} />
-              </span>
-            </div>
-            <MarkdownBody className="text-sm">{comment.body}</MarkdownBody>
-            {companyId ? (
-              <div className="mt-2 space-y-2">
-                <PluginSlotOutlet
-                  slotTypes={["commentAnnotation"]}
-                  entityType="comment"
-                  context={{
-                    companyId,
-                    projectId: projectId ?? null,
-                    entityId: comment.id,
-                    entityType: "comment",
-                    parentEntityId: comment.issueId,
-                  }}
-                  className="space-y-2"
-                  itemClassName="rounded-md"
-                  missingBehavior="placeholder"
-                />
-              </div>
-            ) : null}
-            {comment.runId && (
-              <div className="mt-2 pt-2 border-t border-border/60">
-                {comment.runAgentId ? (
-                  <Link
-                    to={`/agents/${comment.runAgentId}/runs/${comment.runId}`}
-                    className="inline-flex items-center rounded-md border border-border bg-accent/30 px-2 py-1 text-[10px] font-mono text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors"
-                  >
-                    run {comment.runId.slice(0, 8)}
-                  </Link>
-                ) : (
-                  <span className="inline-flex items-center rounded-md border border-border bg-accent/30 px-2 py-1 text-[10px] font-mono text-muted-foreground">
-                    run {comment.runId.slice(0, 8)}
-                  </span>
-                )}
-              </div>
-            )}
-          </div>
+            comment={comment}
+            agentMap={agentMap}
+            companyId={companyId}
+            projectId={projectId}
+            isHighlighted={highlightCommentId === comment.id}
+            onDelete={onDelete}
+          />
         );
       })}
     </div>
@@ -260,6 +336,7 @@ export function CommentThread({
   companyId,
   projectId,
   onAdd,
+  onDelete,
   agentMap,
   imageUploadHandler,
   onAttachImage,
@@ -409,6 +486,7 @@ export function CommentThread({
         companyId={companyId}
         projectId={projectId}
         highlightCommentId={highlightCommentId}
+        onDelete={onDelete}
       />
 
       {liveRunSlot}

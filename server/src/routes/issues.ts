@@ -1219,6 +1219,40 @@ export function issueRoutes(db: Db, storage: StorageService) {
     res.json(comment);
   });
 
+  router.delete("/issues/:id/comments/:commentId", async (req, res) => {
+    const id = req.params.id as string;
+    const commentId = req.params.commentId as string;
+    const issue = await svc.getById(id);
+    if (!issue) {
+      res.status(404).json({ error: "Issue not found" });
+      return;
+    }
+    assertCompanyAccess(req, issue.companyId);
+    const existing = await svc.getComment(commentId);
+    if (!existing || existing.issueId !== id) {
+      res.status(404).json({ error: "Comment not found" });
+      return;
+    }
+    const actor = getActorInfo(req);
+    const removed = await svc.removeComment(commentId);
+    if (!removed) {
+      res.status(404).json({ error: "Comment not found" });
+      return;
+    }
+    await logActivity(db, {
+      companyId: issue.companyId,
+      actorType: actor.actorType,
+      actorId: actor.actorId,
+      agentId: actor.agentId,
+      runId: actor.runId,
+      action: "issue.comment_deleted",
+      entityType: "issue",
+      entityId: issue.id,
+      details: { commentId: removed.id },
+    });
+    res.json(removed);
+  });
+
   router.post("/issues/:id/comments", validate(addIssueCommentSchema), async (req, res) => {
     const id = req.params.id as string;
     const issue = await svc.getById(id);
