@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, useCallback, useRef } from "react";
+import { useToast } from "../context/ToastContext";
 import { useQuery } from "@tanstack/react-query";
 import { pickTextColorForPillBg } from "@/lib/color-contrast";
 import { useDialog } from "../context/DialogContext";
@@ -211,8 +212,9 @@ export function IssuesList({
   });
   const [assigneePickerIssueId, setAssigneePickerIssueId] = useState<string | null>(null);
   const [assigneeSearch, setAssigneeSearch] = useState("");
+  const { pushToast } = useToast();
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
-  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [deletingIds, setDeletingIds] = useState<Set<string>>(new Set());
   const [issueSearch, setIssueSearch] = useState(initialSearch ?? "");
   const [debouncedIssueSearch, setDebouncedIssueSearch] = useState(issueSearch);
   const normalizedIssueSearch = debouncedIssueSearch.trim();
@@ -854,7 +856,7 @@ export function IssuesList({
                     <span className="flex items-center gap-2">
                       <span>{formatDate(issue.createdAt)}</span>
                       {onDeleteIssue && (
-                        deletingId === issue.id ? (
+                        deletingIds.has(issue.id) ? (
                           <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
                         ) : (
                         <Popover
@@ -898,9 +900,15 @@ export function IssuesList({
                                 onClick={(e) => {
                                   e.preventDefault();
                                   e.stopPropagation();
-                                  setDeletingId(issue.id);
                                   setConfirmDeleteId(null);
-                                  onDeleteIssue(issue.id).finally(() => setDeletingId(null));
+                                  setDeletingIds((prev) => new Set(prev).add(issue.id));
+                                  onDeleteIssue(issue.id)
+                                    .catch(() => {
+                                      pushToast({ title: "Failed to delete issue. Please try again.", tone: "error" });
+                                    })
+                                    .finally(() => {
+                                      setDeletingIds((prev) => { const next = new Set(prev); next.delete(issue.id); return next; });
+                                    });
                                 }}
                               >
                                 Delete

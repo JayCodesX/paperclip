@@ -3840,6 +3840,15 @@ export function heartbeatService(db: Db) {
 
     cancelRun: (runId: string) => cancelRunInternal(runId),
 
+    removeRun: async (runId: string) => {
+      const run = await getRun(runId);
+      if (!run) return null;
+      // Delete events first (no cascade constraint)
+      await db.delete(heartbeatRunEvents).where(eq(heartbeatRunEvents.runId, runId));
+      await db.delete(heartbeatRuns).where(eq(heartbeatRuns.id, runId));
+      return run;
+    },
+
     cancelActiveForAgent: (agentId: string) => cancelActiveForAgentInternal(agentId),
 
     cancelBudgetScopeWork,

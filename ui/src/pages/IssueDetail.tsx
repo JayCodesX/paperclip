@@ -493,12 +493,28 @@ export function IssueDetail() {
       queryClient.invalidateQueries({ queryKey: queryKeys.issues.list(selectedCompanyId!) });
       navigate("/issues/all");
     },
+    onError: () => {
+      pushToast({ title: "Failed to delete issue. Please try again.", tone: "error" });
+    },
   });
 
   const deleteComment = useMutation({
     mutationFn: (commentId: string) => issuesApi.deleteComment(issueId!, commentId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.issues.comments(issueId!) });
+    },
+    onError: () => {
+      pushToast({ title: "Failed to delete comment. Please try again.", tone: "error" });
+    },
+  });
+
+  const deleteRun = useMutation({
+    mutationFn: (runId: string) => heartbeatsApi.delete(runId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.issues.runs(issueId!) });
+    },
+    onError: () => {
+      pushToast({ title: "Failed to delete run. Please try again.", tone: "error" });
     },
   });
 
@@ -1076,6 +1092,7 @@ export function IssueDetail() {
             suggestedAssigneeValue={suggestedAssigneeValue}
             mentions={mentionOptions}
             onDelete={async (commentId) => { await deleteComment.mutateAsync(commentId); }}
+            onDeleteRun={async (runId) => { await deleteRun.mutateAsync(runId); }}
             onAdd={async (body, reopen, reassignment) => {
               if (reassignment) {
                 await addCommentAndReassign.mutateAsync({ body, reopen, reassignment });

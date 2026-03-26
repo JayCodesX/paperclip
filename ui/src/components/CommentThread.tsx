@@ -38,6 +38,7 @@ interface CommentThreadProps {
   projectId?: string | null;
   onAdd: (body: string, reopen?: boolean, reassignment?: CommentReassignment) => Promise<void>;
   onDelete?: (commentId: string) => Promise<void>;
+  onDeleteRun?: (runId: string) => Promise<void>;
   issueStatus?: string;
   agentMap?: Map<string, Agent>;
   imageUploadHandler?: (file: File) => Promise<string>;
@@ -262,6 +263,84 @@ function CommentItem({
   );
 }
 
+function RunItem({
+  run,
+  agentMap,
+  onDeleteRun,
+}: {
+  run: LinkedRunItem;
+  agentMap?: Map<string, Agent>;
+  onDeleteRun?: (runId: string) => Promise<void>;
+}) {
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  return (
+    <div className="group border border-border bg-accent/20 p-3 overflow-hidden min-w-0 rounded-sm">
+      <div className="flex items-center justify-between mb-2">
+        <Link to={`/agents/${run.agentId}`} className="hover:underline">
+          <Identity
+            name={agentMap?.get(run.agentId)?.name ?? run.agentId.slice(0, 8)}
+            size="sm"
+          />
+        </Link>
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-muted-foreground">
+            {formatDateTime(run.startedAt ?? run.createdAt)}
+          </span>
+          {onDeleteRun && (
+            <Popover open={confirmDelete} onOpenChange={setConfirmDelete}>
+              <PopoverTrigger asChild>
+                <button
+                  className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive transition-opacity"
+                  title="Delete run"
+                >
+                  {deleting ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />}
+                </button>
+              </PopoverTrigger>
+              <PopoverContent className="w-48 p-2" align="end">
+                <p className="text-xs text-muted-foreground mb-2">Delete this run?</p>
+                <div className="flex gap-1">
+                  <button
+                    className="flex-1 px-2 py-1 text-xs rounded border border-border hover:bg-accent"
+                    onClick={() => setConfirmDelete(false)}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    className="flex-1 px-2 py-1 text-xs rounded bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                    onClick={async () => {
+                      setConfirmDelete(false);
+                      setDeleting(true);
+                      try {
+                        await onDeleteRun(run.runId);
+                      } finally {
+                        setDeleting(false);
+                      }
+                    }}
+                  >
+                    Delete
+                  </button>
+                </div>
+              </PopoverContent>
+            </Popover>
+          )}
+        </div>
+      </div>
+      <div className="flex items-center gap-2 text-xs">
+        <span className="text-muted-foreground">Run</span>
+        <Link
+          to={`/agents/${run.agentId}/runs/${run.runId}`}
+          className="inline-flex items-center rounded-md border border-border bg-accent/40 px-2 py-1 font-mono text-muted-foreground hover:text-foreground hover:bg-accent/60 transition-colors"
+        >
+          {run.runId.slice(0, 8)}
+        </Link>
+        <StatusBadge status={run.status} />
+      </div>
+    </div>
+  );
+}
+
 const TimelineList = memo(function TimelineList({
   timeline,
   agentMap,
@@ -269,6 +348,7 @@ const TimelineList = memo(function TimelineList({
   projectId,
   highlightCommentId,
   onDelete,
+  onDeleteRun,
 }: {
   timeline: TimelineItem[];
   agentMap?: Map<string, Agent>;
@@ -276,6 +356,7 @@ const TimelineList = memo(function TimelineList({
   projectId?: string | null;
   highlightCommentId?: string | null;
   onDelete?: (commentId: string) => Promise<void>;
+  onDeleteRun?: (runId: string) => Promise<void>;
 }) {
   if (timeline.length === 0) {
     return <p className="text-sm text-muted-foreground">No comments or runs yet.</p>;
@@ -285,31 +366,13 @@ const TimelineList = memo(function TimelineList({
     <div className="space-y-3">
       {timeline.map((item) => {
         if (item.kind === "run") {
-          const run = item.run;
           return (
-            <div key={`run:${run.runId}`} className="border border-border bg-accent/20 p-3 overflow-hidden min-w-0 rounded-sm">
-              <div className="flex items-center justify-between mb-2">
-                <Link to={`/agents/${run.agentId}`} className="hover:underline">
-                  <Identity
-                    name={agentMap?.get(run.agentId)?.name ?? run.agentId.slice(0, 8)}
-                    size="sm"
-                  />
-                </Link>
-                <span className="text-xs text-muted-foreground">
-                  {formatDateTime(run.startedAt ?? run.createdAt)}
-                </span>
-              </div>
-              <div className="flex items-center gap-2 text-xs">
-                <span className="text-muted-foreground">Run</span>
-                <Link
-                  to={`/agents/${run.agentId}/runs/${run.runId}`}
-                  className="inline-flex items-center rounded-md border border-border bg-accent/40 px-2 py-1 font-mono text-muted-foreground hover:text-foreground hover:bg-accent/60 transition-colors"
-                >
-                  {run.runId.slice(0, 8)}
-                </Link>
-                <StatusBadge status={run.status} />
-              </div>
-            </div>
+            <RunItem
+              key={`run:${item.run.runId}`}
+              run={item.run}
+              agentMap={agentMap}
+              onDeleteRun={onDeleteRun}
+            />
           );
         }
 
@@ -337,6 +400,7 @@ export function CommentThread({
   projectId,
   onAdd,
   onDelete,
+  onDeleteRun,
   agentMap,
   imageUploadHandler,
   onAttachImage,
@@ -487,6 +551,7 @@ export function CommentThread({
         projectId={projectId}
         highlightCommentId={highlightCommentId}
         onDelete={onDelete}
+        onDeleteRun={onDeleteRun}
       />
 
       {liveRunSlot}
