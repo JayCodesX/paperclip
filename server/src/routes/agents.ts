@@ -2152,6 +2152,28 @@ export function agentRoutes(db: Db) {
     res.json(run);
   });
 
+  router.delete("/heartbeat-runs/:runId", async (req, res) => {
+    assertBoard(req);
+    const runId = req.params.runId as string;
+    const run = await heartbeat.getRun(runId);
+    if (!run) {
+      res.status(404).json({ error: "Heartbeat run not found" });
+      return;
+    }
+    assertCompanyAccess(req, run.companyId);
+    await heartbeat.removeRun(runId);
+    await logActivity(db, {
+      companyId: run.companyId,
+      actorType: "user",
+      actorId: req.actor.userId ?? "board",
+      action: "heartbeat.deleted",
+      entityType: "heartbeat_run",
+      entityId: run.id,
+      details: { agentId: run.agentId },
+    });
+    res.status(204).send();
+  });
+
   router.get("/heartbeat-runs/:runId/events", async (req, res) => {
     const runId = req.params.runId as string;
     const run = await heartbeat.getRun(runId);

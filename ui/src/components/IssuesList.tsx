@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, useCallback, useRef } from "react";
+import { useToast } from "../context/ToastContext";
 import { useQuery } from "@tanstack/react-query";
 import { pickTextColorForPillBg } from "@/lib/color-contrast";
 import { useDialog } from "../context/DialogContext";
@@ -21,7 +22,7 @@ import { Input } from "@/components/ui/input";
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible";
-import { CircleDot, Plus, Filter, ArrowUpDown, Layers, Check, X, ChevronRight, List, Columns3, User, Search } from "lucide-react";
+import { CircleDot, Plus, Filter, ArrowUpDown, Layers, Check, X, ChevronRight, List, Columns3, User, Search, Trash2, Loader2 } from "lucide-react";
 import { KanbanBoard } from "./KanbanBoard";
 import type { Issue } from "@paperclipai/shared";
 
@@ -172,6 +173,7 @@ interface IssuesListProps {
   };
   onSearchChange?: (search: string) => void;
   onUpdateIssue: (id: string, data: Record<string, unknown>) => void;
+  onDeleteIssue?: (id: string) => Promise<unknown>;
 }
 
 export function IssuesList({
@@ -189,6 +191,7 @@ export function IssuesList({
   searchFilters,
   onSearchChange,
   onUpdateIssue,
+  onDeleteIssue,
 }: IssuesListProps) {
   const { selectedCompanyId } = useCompany();
   const { openNewIssue } = useDialog();
@@ -209,6 +212,9 @@ export function IssuesList({
   });
   const [assigneePickerIssueId, setAssigneePickerIssueId] = useState<string | null>(null);
   const [assigneeSearch, setAssigneeSearch] = useState("");
+  const { pushToast } = useToast();
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [deletingIds, setDeletingIds] = useState<Set<string>>(new Set());
   const [issueSearch, setIssueSearch] = useState(initialSearch ?? "");
   const [debouncedIssueSearch, setDebouncedIssueSearch] = useState(issueSearch);
   const normalizedIssueSearch = debouncedIssueSearch.trim();
@@ -846,7 +852,74 @@ export function IssuesList({
                       </Popover>
                     </>
                   )}
-                  trailingMeta={formatDate(issue.createdAt)}
+                  trailingMeta={(
+                    <span className="flex items-center gap-2">
+                      <span>{formatDate(issue.createdAt)}</span>
+                      {onDeleteIssue && (
+                        deletingIds.has(issue.id) ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
+                        ) : (
+                        <Popover
+                          open={confirmDeleteId === issue.id}
+                          onOpenChange={(open) => setConfirmDeleteId(open ? issue.id : null)}
+                        >
+                          <PopoverTrigger asChild>
+                            <button
+                              className="rounded p-1 text-muted-foreground opacity-0 transition-opacity hover:bg-destructive/10 hover:text-destructive group-hover/row:opacity-100"
+                              onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                setConfirmDeleteId(issue.id);
+                              }}
+                              title="Delete issue"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          </PopoverTrigger>
+                          <PopoverContent
+                            className="w-64 p-3"
+                            align="end"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <p className="mb-3 text-sm font-medium">Delete this issue? This cannot be undone.</p>
+                            <div className="flex items-center justify-end gap-2">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={(e) => {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  setConfirmDeleteId(null);
+                                }}
+                              >
+                                Cancel
+                              </Button>
+                              <Button
+                                variant="destructive"
+                                size="sm"
+                                onClick={(e) => {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  setConfirmDeleteId(null);
+                                  setDeletingIds((prev) => new Set(prev).add(issue.id));
+                                  onDeleteIssue(issue.id)
+                                    .catch(() => {
+                                      pushToast({ title: "Failed to delete issue. Please try again.", tone: "error" });
+                                    })
+                                    .finally(() => {
+                                      setDeletingIds((prev) => { const next = new Set(prev); next.delete(issue.id); return next; });
+                                    });
+                                }}
+                              >
+                                Delete
+                              </Button>
+                            </div>
+                          </PopoverContent>
+                        </Popover>
+                        )
+                      )}
+                    </span>
+                  )}
                 />
               ))}
             </CollapsibleContent>

@@ -19,6 +19,8 @@ import {
   labels,
   projectWorkspaces,
   projects,
+  costEvents,
+  financeEvents,
 } from "@paperclipai/db";
 import { extractAgentMentionIds, extractProjectMentionIds } from "@paperclipai/shared";
 import { conflict, notFound, unprocessable } from "../errors.js";
@@ -990,6 +992,14 @@ export function issueService(db: Db) {
           .from(issueDocuments)
           .where(eq(issueDocuments.issueId, id));
 
+        // Clean up non-cascading FK references before deleting the issue
+        await tx.delete(activityLog).where(and(eq(activityLog.entityType, "issue"), eq(activityLog.entityId, id)));
+        await tx.delete(issueReadStates).where(eq(issueReadStates.issueId, id));
+        await tx.delete(issueComments).where(eq(issueComments.issueId, id));
+        await tx.update(issues).set({ parentId: null }).where(eq(issues.parentId, id));
+        await tx.update(costEvents).set({ issueId: null }).where(eq(costEvents.issueId, id));
+        await tx.update(financeEvents).set({ issueId: null }).where(eq(financeEvents.issueId, id));
+
         const removedIssue = await tx
           .delete(issues)
           .where(eq(issues.id, id))
@@ -1390,6 +1400,14 @@ export function issueService(db: Db) {
         .where(eq(issues.id, issueId));
 
       return redactIssueComment(comment, currentUserRedactionOptions.enabled);
+    },
+
+    removeComment: async (commentId: string) => {
+      const [removed] = await db
+        .delete(issueComments)
+        .where(eq(issueComments.id, commentId))
+        .returning();
+      return removed ?? null;
     },
 
     createAttachment: async (input: {

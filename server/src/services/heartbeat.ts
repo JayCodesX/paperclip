@@ -6,6 +6,7 @@ import { and, asc, desc, eq, gt, inArray, sql } from "drizzle-orm";
 import type { Db } from "@paperclipai/db";
 import type { BillingType } from "@paperclipai/shared";
 import {
+  activityLog,
   agents,
   agentRuntimeState,
   agentTaskSessions,
@@ -3839,6 +3840,17 @@ export function heartbeatService(db: Db) {
     },
 
     cancelRun: (runId: string) => cancelRunInternal(runId),
+
+    removeRun: async (runId: string) => {
+      const run = await getRun(runId);
+      if (!run) return null;
+      // Delete activity log entries first (runId FK has no cascade)
+      await db.delete(activityLog).where(eq(activityLog.runId, runId));
+      // Delete events (no cascade constraint)
+      await db.delete(heartbeatRunEvents).where(eq(heartbeatRunEvents.runId, runId));
+      await db.delete(heartbeatRuns).where(eq(heartbeatRuns.id, runId));
+      return run;
+    },
 
     cancelActiveForAgent: (agentId: string) => cancelActiveForAgentInternal(agentId),
 

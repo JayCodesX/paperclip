@@ -526,6 +526,7 @@ export function AgentDetail() {
   const { closePanel } = usePanel();
   const { openNewIssue } = useDialog();
   const { setBreadcrumbs } = useBreadcrumbs();
+  const { pushToast } = useToast();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const [actionError, setActionError] = useState<string | null>(null);
@@ -691,6 +692,18 @@ export function AgentDetail() {
     },
     onError: (err) => {
       setActionError(err instanceof Error ? err.message : "Action failed");
+    },
+  });
+
+  const deleteRunMutation = useMutation({
+    mutationFn: (runId: string) => heartbeatsApi.delete(runId),
+    onSuccess: () => {
+      if (resolvedCompanyId && agent?.id) {
+        queryClient.invalidateQueries({ queryKey: queryKeys.heartbeats(resolvedCompanyId, agent.id) });
+      }
+    },
+    onError: () => {
+      pushToast({ title: "Failed to delete run. Please try again.", tone: "error" });
     },
   });
 
@@ -877,16 +890,6 @@ export function AgentDetail() {
                 Copy Agent ID
               </button>
               <button
-                className="flex items-center gap-2 w-full px-2 py-1.5 text-xs rounded hover:bg-accent/50"
-                onClick={() => {
-                  resetTaskSession.mutate(null);
-                  setMoreOpen(false);
-                }}
-              >
-                <RotateCcw className="h-3 w-3" />
-                Reset Sessions
-              </button>
-              <button
                 className="flex items-center gap-2 w-full px-2 py-1.5 text-xs rounded hover:bg-accent/50 text-destructive"
                 onClick={() => {
                   agentAction.mutate("terminate");
@@ -1035,6 +1038,7 @@ export function AgentDetail() {
           agentRouteId={canonicalAgentRef}
           selectedRunId={urlRunId ?? null}
           adapterType={agent.adapterType}
+          onDeleteRun={(runId) => deleteRunMutation.mutateAsync(runId)}
         />
       )}
 
@@ -2731,52 +2735,95 @@ function AgentSkillsTab({
 
 /* ---- Runs Tab ---- */
 
-function RunListItem({ run, isSelected, agentId }: { run: HeartbeatRun; isSelected: boolean; agentId: string }) {
+function RunListItem({ run, isSelected, agentId, onDelete }: { run: HeartbeatRun; isSelected: boolean; agentId: string; onDelete?: (runId: string) => Promise<void> }) {
   const statusInfo = runStatusIcons[run.status] ?? { icon: Clock, color: "text-neutral-400" };
   const StatusIcon = statusInfo.icon;
   const metrics = runMetrics(run);
   const summary = run.resultJson
     ? String((run.resultJson as Record<string, unknown>).summary ?? (run.resultJson as Record<string, unknown>).result ?? "")
     : run.error ?? "";
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   return (
-    <Link
-      to={isSelected ? `/agents/${agentId}/runs` : `/agents/${agentId}/runs/${run.id}`}
-      className={cn(
-        "flex flex-col gap-1 w-full px-3 py-2.5 text-left border-b border-border last:border-b-0 transition-colors no-underline text-inherit",
-        isSelected ? "bg-accent/40" : "hover:bg-accent/20",
-      )}
-    >
-      <div className="flex items-center gap-2">
-        <StatusIcon className={cn("h-3.5 w-3.5 shrink-0", statusInfo.color, run.status === "running" && "animate-spin")} />
-        <span className="font-mono text-xs text-muted-foreground">
-          {run.id.slice(0, 8)}
-        </span>
-        <span className={cn(
-          "inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-medium shrink-0",
-          run.invocationSource === "timer" ? "bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300"
-            : run.invocationSource === "assignment" ? "bg-violet-100 text-violet-700 dark:bg-violet-900/50 dark:text-violet-300"
-            : run.invocationSource === "on_demand" ? "bg-cyan-100 text-cyan-700 dark:bg-cyan-900/50 dark:text-cyan-300"
-            : "bg-muted text-muted-foreground"
-        )}>
-          {sourceLabels[run.invocationSource] ?? run.invocationSource}
-        </span>
-        <span className="ml-auto text-[11px] text-muted-foreground shrink-0">
-          {relativeTime(run.createdAt)}
-        </span>
-      </div>
-      {summary && (
-        <span className="text-xs text-muted-foreground truncate pl-5.5">
-          {summary.slice(0, 60)}
-        </span>
-      )}
-      {(metrics.totalTokens > 0 || metrics.cost > 0) && (
-        <div className="flex items-center gap-2 pl-5.5 text-[11px] text-muted-foreground tabular-nums">
-          {metrics.totalTokens > 0 && <span>{formatTokens(metrics.totalTokens)} tok</span>}
-          {metrics.cost > 0 && <span>${metrics.cost.toFixed(3)}</span>}
+    <div className={cn(
+      "group relative flex flex-col gap-1 w-full border-b border-border last:border-b-0 transition-colors",
+      isSelected ? "bg-accent/40" : "hover:bg-accent/20",
+    )}>
+      <Link
+        to={isSelected ? `/agents/${agentId}/runs` : `/agents/${agentId}/runs/${run.id}`}
+        className="flex flex-col gap-1 w-full px-3 py-2.5 no-underline text-inherit"
+      >
+        <div className="flex items-center gap-2">
+          <StatusIcon className={cn("h-3.5 w-3.5 shrink-0", statusInfo.color, run.status === "running" && "animate-spin")} />
+          <span className="font-mono text-xs text-muted-foreground">
+            {run.id.slice(0, 8)}
+          </span>
+          <span className={cn(
+            "inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-medium shrink-0",
+            run.invocationSource === "timer" ? "bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300"
+              : run.invocationSource === "assignment" ? "bg-violet-100 text-violet-700 dark:bg-violet-900/50 dark:text-violet-300"
+              : run.invocationSource === "on_demand" ? "bg-cyan-100 text-cyan-700 dark:bg-cyan-900/50 dark:text-cyan-300"
+              : "bg-muted text-muted-foreground"
+          )}>
+            {sourceLabels[run.invocationSource] ?? run.invocationSource}
+          </span>
+          <span className="ml-auto text-[11px] text-muted-foreground shrink-0">
+            {relativeTime(run.createdAt)}
+          </span>
+        </div>
+        {summary && (
+          <span className="text-xs text-muted-foreground truncate pl-5.5">
+            {summary.slice(0, 60)}
+          </span>
+        )}
+        {(metrics.totalTokens > 0 || metrics.cost > 0) && (
+          <div className="flex items-center gap-2 pl-5.5 text-[11px] text-muted-foreground tabular-nums">
+            {metrics.totalTokens > 0 && <span>{formatTokens(metrics.totalTokens)} tok</span>}
+            {metrics.cost > 0 && <span>${metrics.cost.toFixed(3)}</span>}
+          </div>
+        )}
+      </Link>
+      {onDelete && (
+        <div className="absolute top-2 right-2" onClick={(e) => e.stopPropagation()}>
+          <Popover open={confirmDelete} onOpenChange={setConfirmDelete}>
+            <PopoverTrigger asChild>
+              <button
+                className="opacity-0 group-hover:opacity-100 p-1 rounded text-muted-foreground hover:text-destructive transition-opacity"
+                title="Delete run"
+              >
+                {deleting ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />}
+              </button>
+            </PopoverTrigger>
+            <PopoverContent className="w-48 p-2" align="end">
+              <p className="text-xs text-muted-foreground mb-2">Delete this run?</p>
+              <div className="flex gap-1">
+                <button
+                  className="flex-1 px-2 py-1 text-xs rounded border border-border hover:bg-accent"
+                  onClick={() => setConfirmDelete(false)}
+                >
+                  Cancel
+                </button>
+                <button
+                  className="flex-1 px-2 py-1 text-xs rounded bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                  onClick={async () => {
+                    setConfirmDelete(false);
+                    setDeleting(true);
+                    try {
+                      await onDelete(run.id);
+                    } finally {
+                      setDeleting(false);
+                    }
+                  }}
+                >
+                  Delete
+                </button>
+              </div>
+            </PopoverContent>
+          </Popover>
         </div>
       )}
-    </Link>
+    </div>
   );
 }
 
@@ -2787,6 +2834,7 @@ function RunsTab({
   agentRouteId,
   selectedRunId,
   adapterType,
+  onDeleteRun,
 }: {
   runs: HeartbeatRun[];
   companyId: string;
@@ -2794,6 +2842,7 @@ function RunsTab({
   agentRouteId: string;
   selectedRunId: string | null;
   adapterType: string;
+  onDeleteRun?: (runId: string) => Promise<void>;
 }) {
   const { isMobile } = useSidebar();
 
@@ -2829,7 +2878,7 @@ function RunsTab({
     return (
       <div className="border border-border rounded-lg overflow-x-hidden">
         {sorted.map((run) => (
-          <RunListItem key={run.id} run={run} isSelected={false} agentId={agentRouteId} />
+          <RunListItem key={run.id} run={run} isSelected={false} agentId={agentRouteId} onDelete={onDeleteRun} />
         ))}
       </div>
     );
@@ -2845,7 +2894,7 @@ function RunsTab({
       )}>
         <div className="sticky top-4 overflow-y-auto" style={{ maxHeight: "calc(100vh - 2rem)" }}>
         {sorted.map((run) => (
-          <RunListItem key={run.id} run={run} isSelected={run.id === effectiveRunId} agentId={agentRouteId} />
+          <RunListItem key={run.id} run={run} isSelected={run.id === effectiveRunId} agentId={agentRouteId} onDelete={onDeleteRun} />
         ))}
         </div>
       </div>
