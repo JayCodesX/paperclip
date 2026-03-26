@@ -993,6 +993,7 @@ export function issueService(db: Db) {
           .where(eq(issueDocuments.issueId, id));
 
         // Clean up non-cascading FK references before deleting the issue
+        await tx.delete(activityLog).where(and(eq(activityLog.entityType, "issue"), eq(activityLog.entityId, id)));
         await tx.delete(issueReadStates).where(eq(issueReadStates.issueId, id));
         await tx.delete(issueComments).where(eq(issueComments.issueId, id));
         await tx.update(issues).set({ parentId: null }).where(eq(issues.parentId, id));
